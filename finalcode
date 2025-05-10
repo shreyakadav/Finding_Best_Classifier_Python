@@ -1,0 +1,119 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import roc_auc_score, roc_curve
+from sklearn.preprocessing import StandardScaler
+
+def aucCV(features, labels, model):
+    # Compute 10-fold cross-validated AUC score
+    scores = cross_val_score(model, features, labels, cv=10, scoring='roc_auc')
+    return scores
+
+def predictTest(trainFeatures, trainLabels, testFeatures):
+    # Define classifiers with fixed random_state for reproducibility
+    models = {
+        'Naive Bayes': GaussianNB(),
+        'Decision Tree': DecisionTreeClassifier(random_state=42),
+        'Random Forest': RandomForestClassifier(random_state=42, n_estimators=100),
+        'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000),
+        'SVM': SVC(probability=True, random_state=42),
+        'AdaBoost': AdaBoostClassifier(random_state=42),
+        'Neural Network': MLPClassifier(random_state=42, max_iter=1000)  # Add Neural Network
+    }
+
+    results = {}
+    for name, model in models.items():
+        model.fit(trainFeatures, trainLabels)
+        # Get the probability of the positive class (spam)
+        results[name] = model.predict_proba(testFeatures)[:, 1]
+
+    return results
+
+def tpr_at_fpr(y_true, y_scores, target_fpr=0.01):
+    # Calculate ROC curve data
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    # Find the index where FPR is closest to target_fpr
+    idx = np.argmin(np.abs(fpr - target_fpr))
+    return tpr[idx]
+
+if __name__ == "__main__":
+    # Load the datasets
+    spam1 = pd.read_csv('/content/spam1.csv', delimiter=',', header=None)
+    spam2 = pd.read_csv('/content/spam2.csv', delimiter=',', header=None)
+    data = pd.concat([spam1, spam2], ignore_index=True)
+
+    # Convert to numpy array
+    data_array = data.values
+
+    # Separate features and labels (last column is the target)
+    features = data_array[:, :-1]
+    labels = data_array[:, -1]
+
+    # Split the data into training and test sets using train_test_split with stratification
+    trainFeatures, testFeatures, trainLabels, testLabels = train_test_split(
+        features, labels, test_size=0.5, stratify=labels, random_state=42)
+
+    # Apply feature scaling (fit on training set, then transform both train and test)
+    scaler = StandardScaler()
+    trainFeatures = scaler.fit_transform(trainFeatures)
+    testFeatures = scaler.transform(testFeatures)
+
+    # Evaluate classifiers using cross-validation on the training set
+    models = {
+        'Naive Bayes': GaussianNB(),
+        'Decision Tree': DecisionTreeClassifier(random_state=42),
+        'Random Forest': RandomForestClassifier(random_state=42, n_estimators=100),
+        'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000),
+        'SVM': SVC(probability=True, random_state=42),
+        'AdaBoost': AdaBoostClassifier(random_state=42),
+        'Neural Network': MLPClassifier(random_state=42, max_iter=1000)  # Add Neural Network
+    }
+
+    print("Cross-Validated AUC Scores on Training Data:")
+    for name, model in models.items():
+        scores = aucCV(trainFeatures, trainLabels, model)
+        print(f"{name} - Mean AUC: {np.mean(scores):.4f}")
+
+    # Get predictions for test set using the predictTest function
+    predictions = predictTest(trainFeatures, trainLabels, testFeatures)
+
+    print("\nTest Set AUC Scores and TPR at 1% FPR:")
+    for name, testOutputs in predictions.items():
+        auc_score = roc_auc_score(testLabels, testOutputs)
+        tpr_value = tpr_at_fpr(testLabels, testOutputs, target_fpr=0.01)
+        print(f"{name} - AUC: {auc_score:.4f}, TPR at 1% FPR: {tpr_value:.4f}")
+
+        # Plot sorted test labels vs predicted probabilities
+        sortIndex = np.argsort(testLabels)
+        nTestExamples = testLabels.size
+        plt.figure(figsize=(10, 6))
+
+        # Create color map based on the true labels
+        spam_color = 'red'    # Color for spam (positive class)
+        not_spam_color = 'green'  # Color for not spam (negative class)
+
+        plt.subplot(2, 1, 1)
+        plt.scatter(np.arange(nTestExamples)[testLabels[sortIndex] == 1], testLabels[sortIndex][testLabels[sortIndex] == 1], color=spam_color, label='Spam')
+        plt.scatter(np.arange(nTestExamples)[testLabels[sortIndex] == 0], testLabels[sortIndex][testLabels[sortIndex] == 0], color=not_spam_color, label='Not Spam')
+        plt.title(f'{name} - Test Labels (sorted)')
+        plt.xlabel('Sorted Example Number')
+        plt.ylabel('True Label')
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.scatter(np.arange(nTestExamples)[testLabels[sortIndex] == 1], testOutputs[sortIndex][testLabels[sortIndex] == 1], color=spam_color, label='Spam')
+        plt.scatter(np.arange(nTestExamples)[testLabels[sortIndex] == 0], testOutputs[sortIndex][testLabels[sortIndex] == 0], color=not_spam_color, label='Not Spam')
+        plt.title(f'{name} - Predicted Probabilities (sorted)')
+        plt.xlabel('Sorted Example Number')
+        plt.ylabel('Probability of Spam')
+        plt.legend()
+
+        plt.tight_layout()
+        plt.show()
